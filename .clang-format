@@ -1,0 +1,6 @@
+BasedOnStyle: WebKit
+IndentWidth: 4
+ColumnLimit: 70
+
+DerivePointerAlignment: false
+PointerAlignment: Left
