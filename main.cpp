@@ -3,7 +3,6 @@
 
 int main()
 {
-    constexpr auto sp = stringParser("bsh").parse("ashwith");
-    std::cout << sp;
+    auto sp = seqParser(characterParser('a'), stringParser("shwith"));
     return 0;
 }

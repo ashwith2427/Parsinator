@@ -28,6 +28,7 @@
 #include <optional>
 #include <ostream>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 template <class T, class E = const char*> class Result {
@@ -125,4 +126,47 @@ constexpr auto stringParser(std::string_view expected)
             "Expected string should be less than or equal to input "
             "string");
     });
+}
+
+template <class... Parsers>
+constexpr auto getInnerTypes(Parsers&&... parsers)
+{
+    return std::tuple<decltype(std::declval<Parsers>().parse(
+        std::declval<std::string_view>()))...>();
+}
+
+template <class Parser>
+using InnerType = decltype(std::declval<Parser>().parse(
+    std::declval<std::string_view>()));
+
+template <size_t I = 0, class TupleResult, class FirstParser,
+    class... RestParsers>
+constexpr decltype(auto) parseEach(TupleResult& tuple,
+    std::string_view input, FirstParser&& first,
+    RestParsers&&... rest)
+{
+    auto result = first.parse(input);
+    if (result.is_err()) {
+        static_assert(true, "Failed to parse one parser.");
+    }
+    std::get<I>(tuple) = result;
+    std::string_view remaining = input.substr(result.getIndex());
+    if constexpr (sizeof...(RestParsers) == 0) {
+        return Result<TupleResult>::Ok(
+            input.size() - remaining.size(), tuple);
+    } else {
+        return parseEach<I + 1>(
+            tuple, input, std::forward<RestParsers>(rest)...);
+    }
+}
+
+template <class... Parsers>
+constexpr auto seqParser(Parsers&&... parsers)
+{
+    using TupleResult = std::tuple<InnerType<Parsers>...>;
+    return ParserType<TupleResult>(
+        [=](std::string_view input) -> Result<TupleResult> {
+            TupleResult result_tuple;
+            return parseEach(result_tuple, input, parsers...);
+        });
 }
