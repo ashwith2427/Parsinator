@@ -48,6 +48,8 @@ public:
         return Result(idx, error);
     }
 
+    constexpr Result() = default;
+
     constexpr bool is_err() const { return error.has_value(); }
     constexpr bool is_ok() const { return value.has_value(); }
     constexpr std::uint32_t getIndex() const { return idx; }
@@ -150,18 +152,17 @@ constexpr decltype(auto) parseEach(TupleResult& tuple,
             input.size() - remaining.size(), tuple);
     } else {
         return parseEach<I + 1>(
-            tuple, input, std::forward<RestParsers>(rest)...);
+            tuple, remaining, std::forward<RestParsers>(rest)...);
     }
 }
 
 template <class... Parsers>
 constexpr auto seqParser(Parsers&&... parsers)
 {
-    using TupleResult
-        = std::tuple<std::monostate, InnerType<Parsers>...>;
+    using TupleResult = std::tuple<InnerType<Parsers>...>;
     return ParserType<TupleResult>(
         [=](std::string_view input) -> Result<TupleResult> {
-            TupleResult result_tuple {};
+            TupleResult result_tuple { InnerType<Parsers>()... };
             return parseEach(result_tuple, input, parsers...);
         });
 }
