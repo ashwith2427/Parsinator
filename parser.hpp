@@ -32,12 +32,14 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+
 template <class T, class E = const char*> class Result {
     std::uint32_t idx;
     std::optional<T> value;
     std::optional<E> error;
 
 public:
+    using value_type = T;
     constexpr static Result Ok(std::uint32_t idx, T value)
     {
         return Result(idx, value);
@@ -80,6 +82,10 @@ private:
     }
 };
 
+template <> class Result<void> { };
+
+template <class Res> using InnerResultType = typename Res::value_type;
+
 template <class Output, class Fn> class Parser {
 public:
     constexpr Parser(Fn&& f)
@@ -104,7 +110,7 @@ template <class Output, class Fn> constexpr auto ParserType(Fn&& f)
 constexpr auto characterParser(char c)
 {
     return ParserType<char>(
-        [=](std::string_view input) -> Result<char> {
+        [=](std::string_view input) constexpr -> Result<char> {
             if (input.empty())
                 return Result<char>::Err(0, "Empty input");
             if (input[0] == c)
@@ -115,7 +121,8 @@ constexpr auto characterParser(char c)
 
 constexpr auto stringParser(std::string_view expected)
 {
-    return ParserType<std::string_view>([=](std::string_view input) {
+    return ParserType<std::string_view>([=](std::string_view
+                                                input) constexpr {
         if (expected.size() <= input.size()) {
             if (input.starts_with(expected)) {
                 return Result<std::string_view>::Ok(
@@ -161,8 +168,49 @@ constexpr auto seqParser(Parsers&&... parsers)
 {
     using TupleResult = std::tuple<InnerType<Parsers>...>;
     return ParserType<TupleResult>(
-        [=](std::string_view input) -> Result<TupleResult> {
+        [=](std::string_view input) constexpr -> Result<TupleResult> {
             TupleResult result_tuple { InnerType<Parsers>()... };
             return parseEach(result_tuple, input, parsers...);
+        });
+}
+
+template <class ResultType, size_t I = 0, class Parser>
+constexpr std::pair<int, ResultType> choice_impl(
+    std::string_view input, Parser&& parser)
+{
+    auto result = parser.parse(input);
+    if (result.is_err()) {
+        static_assert(true, "None of the parsers matched in choice");
+    }
+    return { result.getIndex(), ResultType(result.getValue()) };
+}
+template <class ResultType, size_t I = 0, class FirstParser,
+    class... RestParsers>
+constexpr std::pair<int, ResultType> choice_impl(
+    std::string_view input, FirstParser&& first,
+    RestParsers&&... rest)
+{
+    auto result = first.parse(input);
+    if (result.is_ok()) {
+        return { result.getIndex(), ResultType(result.getValue()) };
+    }
+    if constexpr (sizeof...(RestParsers) == 0) {
+        static_assert(
+            true, "All the parsers failed in choice parser.");
+    }
+    return choice_impl<ResultType, I + 1>(
+        input, std::forward<RestParsers>(rest)...);
+}
+
+template <class... Parsers>
+constexpr decltype(auto) choice(Parsers&&... parsers)
+{
+    using ResultType
+        = std::variant<InnerResultType<InnerType<Parsers>>...>;
+    return ParserType<ResultType>(
+        [=](std::string_view input) constexpr {
+            auto [idx, res]
+                = choice_impl<ResultType>(input, parsers...);
+            return Result<decltype(res)>::Ok(idx, res);
         });
 }
