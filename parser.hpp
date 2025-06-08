@@ -31,6 +31,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 template <class T, class E = const char*> class Result {
     std::uint32_t idx;
     std::optional<T> value;
@@ -128,13 +129,6 @@ constexpr auto stringParser(std::string_view expected)
     });
 }
 
-template <class... Parsers>
-constexpr auto getInnerTypes(Parsers&&... parsers)
-{
-    return std::tuple<decltype(std::declval<Parsers>().parse(
-        std::declval<std::string_view>()))...>();
-}
-
 template <class Parser>
 using InnerType = decltype(std::declval<Parser>().parse(
     std::declval<std::string_view>()));
@@ -163,10 +157,11 @@ constexpr decltype(auto) parseEach(TupleResult& tuple,
 template <class... Parsers>
 constexpr auto seqParser(Parsers&&... parsers)
 {
-    using TupleResult = std::tuple<InnerType<Parsers>...>;
+    using TupleResult
+        = std::tuple<std::monostate, InnerType<Parsers>...>;
     return ParserType<TupleResult>(
         [=](std::string_view input) -> Result<TupleResult> {
-            TupleResult result_tuple;
+            TupleResult result_tuple {};
             return parseEach(result_tuple, input, parsers...);
         });
 }
