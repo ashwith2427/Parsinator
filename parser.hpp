@@ -45,6 +45,11 @@ public:
         return Result(idx, value);
     }
 
+    constexpr static Result Ok(std::uint32_t idx)
+    {
+        return Result(idx);
+    }
+
     constexpr static Result Err(std::uint32_t idx, E error)
     {
         return Result(idx, error);
@@ -54,6 +59,7 @@ public:
 
     constexpr bool is_err() const { return error.has_value(); }
     constexpr bool is_ok() const { return value.has_value(); }
+    constexpr bool is_empty() const { return !value.has_value(); }
     constexpr std::uint32_t getIndex() const { return idx; }
     constexpr E getError() const { return error.value(); }
     constexpr T getValue() const { return value.value(); }
@@ -73,6 +79,10 @@ private:
     constexpr Result(std::uint32_t idx, T value)
         : idx(idx)
         , value(value)
+    {
+    }
+    constexpr Result(std::uint32_t idx)
+        : idx(idx)
     {
     }
     constexpr Result(std::uint32_t idx, E err)
@@ -212,5 +222,48 @@ constexpr decltype(auto) choice(Parsers&&... parsers)
             auto [idx, res]
                 = choice_impl<ResultType>(input, parsers...);
             return Result<decltype(res)>::Ok(idx, res);
+        });
+}
+
+template <class Parser> constexpr auto optionalParser(Parser&& parser)
+{
+    using ResultType = InnerType<Parser>::value_type;
+    return ParserType<ResultType>(
+        [=](std::string_view input) constexpr -> Result<ResultType> {
+            auto result = parser.parse(input);
+            if (result.is_ok()) {
+                return Result<ResultType>::Ok(
+                    result.getIndex(), result.getValue());
+            } else {
+                return Result<ResultType>::Ok(0);
+            }
+        });
+}
+
+template <size_t N, class Parser>
+constexpr auto manyNParser(Parser&& parser)
+{
+    using ResultType = InnerResultType<InnerType<Parser>>;
+    using ResultArray = std::array<ResultType, N>;
+    return ParserType<ResultArray>(
+        [=](std::string_view input) constexpr -> Result<ResultArray> {
+            ResultArray set {};
+            size_t idx = 0;
+            for (int i = 0; i < N; i++) {
+                if (idx >= input.size()) {
+                    return Result<ResultArray>::Err(0,
+                        "NXM(M = expected_size) is greater than "
+                        "input.size()");
+                }
+                auto result = parser.parse(input.substr(idx));
+                if (result.is_ok() or result.is_empty()) {
+                    set[i] = result.getValue();
+                    idx += result.getIndex();
+                } else {
+                    return Result<ResultArray>::Err(
+                        0, "Parser failed to parse N times.");
+                }
+            }
+            return Result<ResultArray>::Ok(idx, set);
         });
 }
