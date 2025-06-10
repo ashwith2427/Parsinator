@@ -75,11 +75,17 @@ void print_result(const Result<T, E>& res)
 int main()
 {
     auto start = std::chrono::high_resolution_clock::now();
-    constexpr auto result = stringParser("ash").parse("ashwith");
+    constexpr auto result = discard(characterParser('b')).parse("a");
     // std::cout << res.parse("ashwith");
     // print_tuple(result.getValue());
     // print_T<decltype(result.parse(""))>();
     // print_result(result);
+    // if (result.is_err()) {
+    //     std::cout << result.error();
+    // } else {
+    //     std::cout << "Test Passed:\n";
+    //     std::cout << "Value: " << result.index() << '\n';
+    // }
     auto end = std::chrono::high_resolution_clock::now();
 
     std::cout

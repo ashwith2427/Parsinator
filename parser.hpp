@@ -33,9 +33,22 @@
 #include <utility>
 #include <variant>
 
-template <class T, class = void, class E = const char*> class Result {
+struct ParserError {
     std::uint32_t idx;
-    std::variant<std::monostate, T, E> value;
+    const char* msg;
+    friend std::ostream& operator<<(
+        std::ostream& os, ParserError error)
+    {
+        os << "Parser Failed: \n";
+        os << "Index: " << error.idx << '\n';
+        os << "Reason: " << error.msg << '\n';
+        return os;
+    }
+};
+
+template <class T, class = void> class Result {
+    std::uint32_t idx;
+    std::variant<T, ParserError> value;
 
 public:
     using value_type = T;
@@ -44,36 +57,36 @@ public:
         return Result(idx, value);
     }
 
-    constexpr static Result Err(std::uint32_t idx, E error)
+    constexpr static Result Err(ParserError error)
     {
-        return Result(idx, error);
+        return Result(error);
     }
 
     constexpr Result() = default;
 
     constexpr bool is_err() const
     {
-        return std::holds_alternative<E>(value);
+        return std::holds_alternative<ParserError>(value);
     }
     constexpr bool is_ok() const
     {
         return std::holds_alternative<T>(value);
     }
-    constexpr bool is_empty() const
+    constexpr bool is_void() const { return false; }
+    constexpr std::uint32_t index() const { return idx; }
+    constexpr ParserError error() const
     {
-        return std::holds_alternative<std::monostate>(value);
+        return std::get<ParserError>(value);
     }
-    constexpr std::uint32_t getIndex() const { return idx; }
-    constexpr E getError() const { return std::get<E>(value); }
-    constexpr T getValue() const { return std::get<T>(value); }
+    constexpr T unwrap() const { return std::get<T>(value); }
 
     friend std::ostream& operator<<(std::ostream& os, Result r)
     {
         if (r.is_err()) {
-            os << "Error: " << r.getError() << '\n';
-            os << "Position: " << r.getIndex() << '\n';
+            os << "Error: " << r.error() << '\n';
+            os << "Position: " << r.index() << '\n';
         } else {
-            os << "Result: " << r.getValue() << '\n';
+            os << "Result: " << r.unwrap() << '\n';
         }
         return os;
     }
@@ -84,8 +97,8 @@ private:
         , value(value)
     {
     }
-    constexpr Result(std::uint32_t idx, E err)
-        : idx(idx)
+    constexpr Result(ParserError err)
+        : idx(err.idx)
         , value(err)
     {
     }
@@ -100,14 +113,42 @@ private:
 template <> class Result<void> {
 public:
     using value_type = void;
-    constexpr Result(std::uint32_t idx)
-        : idx(idx)
+    constexpr bool is_void() { return true; }
+    constexpr std::uint32_t index() const
     {
+        return std::get<std::uint32_t>(value);
     }
-    constexpr std::uint32_t getIndex() const { return idx; }
+    constexpr ParserError error() const
+    {
+        return std::get<ParserError>(value);
+    }
+    constexpr bool is_ok() const
+    {
+        return std::holds_alternative<std::uint32_t>(value);
+    }
+    constexpr bool is_err() const
+    {
+        return std::holds_alternative<ParserError>(value);
+    }
+    constexpr static Result Ok(std::uint32_t idx)
+    {
+        return Result(idx);
+    }
+    constexpr static Result Err(ParserError err)
+    {
+        return Result(err);
+    }
 
 private:
-    std::uint32_t idx;
+    constexpr Result(std::uint32_t idx)
+        : value(idx)
+    {
+    }
+    constexpr Result(ParserError error)
+        : value(error)
+    {
+    }
+    std::variant<std::uint32_t, ParserError> value;
 };
 
 template <class Res> using InnerResultType = typename Res::value_type;
@@ -138,10 +179,11 @@ constexpr auto characterParser(char c)
     return ParserType<char>(
         [=](std::string_view input) constexpr -> Result<char> {
             if (input.empty())
-                return Result<char>::Err(0, "Empty input");
+                return Result<char>::Err(
+                    ParserError(0, "Empty input"));
             if (input[0] == c)
                 return Result<char>::Ok(1, c);
-            return Result<char>::Err(0, "No match");
+            return Result<char>::Err(ParserError(0, "No match"));
         });
 }
 
@@ -155,12 +197,12 @@ constexpr auto stringParser(std::string_view expected)
                     expected.size(), expected);
             } else {
                 return Result<std::string_view>::Err(
-                    0, "String cannot be matched!");
+                    ParserError(0, "String cannot be matched!"));
             }
         }
-        return Result<std::string_view>::Err(0,
+        return Result<std::string_view>::Err(ParserError(0,
             "Expected string should be less than or equal to input "
-            "string");
+            "string"));
     });
 }
 
@@ -176,11 +218,11 @@ constexpr decltype(auto) parseEach(TupleResult& tuple,
 {
     auto result = first.parse(input);
     if (result.is_err()) {
-        return Result<TupleResult>::Err(result.getIndex(),
+        return Result<TupleResult>::Err(result.index(),
             "Parser " + std::to_string(I) + " cannot be parsed");
     }
     std::get<I>(tuple) = result;
-    std::string_view remaining = input.substr(result.getIndex());
+    std::string_view remaining = input.substr(result.index());
     if constexpr (sizeof...(RestParsers) == 0) {
         return Result<TupleResult>::Ok(
             input.size() - remaining.size(), tuple);
@@ -207,10 +249,10 @@ constexpr std::pair<int, ResultType> choice_impl(
 {
     auto result = parser.parse(input);
     if (result.is_err()) {
-        return Result<ResultType>::Err(
-            result.getIndex(), "None of the parsers parsed");
+        return Result<ResultType>::Err(ParserError(
+            result.index(), "None of the parsers parsed"));
     }
-    return { result.getIndex(), ResultType(result.getValue()) };
+    return { result.index(), ResultType(result.unwrap()) };
 }
 template <class ResultType, size_t I = 0, class FirstParser,
     class... RestParsers>
@@ -220,11 +262,11 @@ constexpr std::pair<int, ResultType> choice_impl(
 {
     auto result = first.parse(input);
     if (result.is_ok()) {
-        return { result.getIndex(), ResultType(result.getValue()) };
+        return { result.index(), ResultType(result.unwrap()) };
     }
     if constexpr (sizeof...(RestParsers) == 0) {
-        return Result<ResultType>::Err(result.getIndex(),
-            "None of the parsers matched in choice parser");
+        return Result<ResultType>::Err(ParserError(result.index(),
+            "None of the parsers matched in choice parser"));
     }
     return choice_impl<ResultType, I + 1>(
         input, std::forward<RestParsers>(rest)...);
@@ -254,17 +296,17 @@ constexpr auto manyNParser(Parser&& parser)
             size_t idx = 0;
             for (int i = 0; i < N; i++) {
                 if (idx >= input.size()) {
-                    return Result<ResultArray>::Err(0,
+                    return Result<ResultArray>::Err(ParserError(0,
                         "NXM(M = expected_size) is greater than "
-                        "input.size()");
+                        "input.size()"));
                 }
                 auto result = parser.parse(input.substr(idx));
                 if (result.is_ok() or result.is_empty()) {
                     set[i] = result.unwrap();
                     idx += result.index();
                 } else {
-                    return Result<ResultArray>::Err(
-                        0, "Parser failed to parse N times.");
+                    return Result<ResultArray>::Err(ParserError(
+                        0, "Parser failed to parse N times."));
                 }
             }
             return Result<ResultArray>(set, idx);
@@ -285,6 +327,20 @@ template <class Parser> constexpr decltype(auto) skip(Parser&& parser)
                     break;
                 consumed += result.index();
             }
-            return Result<void>(consumed);
+            return Result<void>::Ok(consumed);
+        });
+}
+
+template <class Parser>
+constexpr decltype(auto) discard(Parser&& parser)
+{
+    return ParserType<void>(
+        [=](std::string_view input) constexpr -> Result<void> {
+            auto result = parser.parse(input);
+            if (result.is_ok()) {
+                return Result<void>::Ok(result.index());
+            }
+            return Result<void>::Err(
+                ParserError(0, "Discard parser failed to parse"));
         });
 }
