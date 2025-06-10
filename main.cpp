@@ -79,12 +79,12 @@ int main()
     // std::cout << res.parse("ashwith");
     // print_tuple(result.getValue());
     // print_T<decltype(result.parse(""))>();
-    print_result(result);
+    // print_result(result);
     auto end = std::chrono::high_resolution_clock::now();
 
     std::cout
         << "Microseconds: "
         << std::chrono::duration_cast<std::chrono::microseconds>(
-               end - start)
+               (end - start))
         << '\n';
 }
