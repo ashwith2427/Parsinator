@@ -1,9 +1,7 @@
 #include "parser.hpp"
 #include <chrono>
-#include <ios>
 #include <iostream>
 #include <ostream>
-#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -30,10 +28,10 @@ void print_tuple(const std::tuple<Args...>& tup)
     std::cout << ")\n";
 }
 
-template <class T> void print_T()
-{
-    std::cout << __PRETTY_FUNCTION__ << '\n';
-}
+// template <class T> void print_T()
+// {
+//     std::cout << __PRETTY_FUNCTION__ << '\n';
+// }
 // Helper to make overloaded lambdas
 template <typename T> struct is_variant : std::false_type { };
 
@@ -49,8 +47,7 @@ template <class... Ts> struct overloaded : Ts... {
 };
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
-template <typename T, typename E>
-void print_result(const Result<T, E>& res)
+template <typename T> void print_result(const Result<T>& res)
 {
     if (res.is_ok()) {
         if constexpr (is_variant_v<T>) {
@@ -62,7 +59,7 @@ void print_result(const Result<T, E>& res)
                     [](std::string_view sv) {
                         std::cout << "string_view: " << sv << '\n';
                     } },
-                res.getValue());
+                res.unwrap());
         } else {
             // Plain type: print directly
             std::cout << res.getValue() << '\n';
@@ -75,7 +72,16 @@ void print_result(const Result<T, E>& res)
 int main()
 {
     auto start = std::chrono::high_resolution_clock::now();
-    constexpr auto result = discard(characterParser('b')).parse("a");
+    auto result = choice(stringParser("a"), stringParser("also"))
+                      .parse("ashwith");
+    if (!result.is_err()) {
+        print_T<decltype(result.unwrap())>();
+        std::cout << std::get<Result<std::string_view>>(
+            result.unwrap());
+    } else {
+        std::cout << result.error();
+    }
+    int a[10];
     // std::cout << res.parse("ashwith");
     // print_tuple(result.getValue());
     // print_T<decltype(result.parse(""))>();

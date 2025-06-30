@@ -25,6 +25,7 @@
  */
 
 #include <cstdint>
+#include <iostream>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -57,6 +58,7 @@ public:
         return Result(idx, value);
     }
 
+    constexpr static Result Ok(T value) { return Result(value); }
     constexpr static Result Err(ParserError error)
     {
         return Result(error);
@@ -95,6 +97,10 @@ private:
     constexpr Result(std::uint32_t idx, T value)
         : idx(idx)
         , value(value)
+    {
+    }
+    constexpr Result(T value)
+        : value(value)
     {
     }
     constexpr Result(ParserError err)
@@ -243,45 +249,76 @@ constexpr auto seqParser(Parsers&&... parsers)
         });
 }
 
+template <typename T, typename... List>
+constexpr bool is_in_list = (std::is_same_v<T, List> || ...);
+
+template <typename... Types> struct flat_type_container {
+    using type = flat_type_container<Types...>;
+    using variant = std::variant<Types...>;
+};
+
+template <typename First, typename... Types>
+struct flat_type_container<First, flat_type_container<Types...>> {
+    using type = flat_type_container<First, Types...>;
+};
+
+template <typename First, typename... Rest> struct unique_types {
+    using type =
+        typename std::conditional_t<!is_in_list<First, Rest...>,
+            typename flat_type_container<First,
+                typename unique_types<Rest...>::type>::type,
+            typename unique_types<Rest...>::type>;
+};
+
+template <typename First> struct unique_types<First> {
+    using type = flat_type_container<First>;
+};
+
+template <typename... Types> struct get_unique_variant {
+    using container = typename unique_types<Types...>::type;
+    using variant = typename container::variant;
+};
+
+template <typename... List>
+using unique_variant = typename get_unique_variant<List...>::variant;
+
+template <class T> void print_T()
+{
+    std::cout << __PRETTY_FUNCTION__ << '\n';
+}
+
 template <class ResultType, size_t I = 0, class Parser>
-constexpr std::pair<int, ResultType> choice_impl(
+constexpr decltype(auto) choice_impl(
     std::string_view input, Parser&& parser)
 {
     auto result = parser.parse(input);
+    using value_type = decltype(result)::value_type;
     if (result.is_err()) {
-        return Result<ResultType>::Err(ParserError(
-            result.index(), "None of the parsers parsed"));
+        return ResultType(Result<value_type>::Err(ParserError(
+            result.index(), "None of the parsers parsed")));
     }
-    return { result.index(), ResultType(result.unwrap()) };
+    return ResultType(result);
 }
 template <class ResultType, size_t I = 0, class FirstParser,
     class... RestParsers>
-constexpr std::pair<int, ResultType> choice_impl(
-    std::string_view input, FirstParser&& first,
-    RestParsers&&... rest)
+constexpr decltype(auto) choice_impl(std::string_view input,
+    FirstParser&& first, RestParsers&&... rest)
 {
     auto result = first.parse(input);
     if (result.is_ok()) {
-        return { result.index(), ResultType(result.unwrap()) };
-    }
-    if constexpr (sizeof...(RestParsers) == 0) {
-        return Result<ResultType>::Err(ParserError(result.index(),
-            "None of the parsers matched in choice parser"));
+        return ResultType(result);
     }
     return choice_impl<ResultType, I + 1>(
         input, std::forward<RestParsers>(rest)...);
 }
-
 template <class... Parsers>
 constexpr decltype(auto) choice(Parsers&&... parsers)
 {
-    using ResultType
-        = std::variant<InnerResultType<InnerType<Parsers>>...>;
+    using ResultType = unique_variant<InnerType<Parsers>...>;
     return ParserType<ResultType>(
         [=](std::string_view input) constexpr {
-            auto [idx, res]
-                = choice_impl<ResultType>(input, parsers...);
-            return Result<decltype(res)>::Ok(idx, res);
+            return Result<ResultType>::Ok(
+                choice_impl<ResultType>(input, parsers...));
         });
 }
 
