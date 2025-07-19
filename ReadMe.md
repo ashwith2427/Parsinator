@@ -1,4 +1,4 @@
-# Fully CompileTime Parser Combinator Library written fully in c++20.
+# Parsinator — A Fully Compile-Time Parser Combinator Library in C++20
 
 ## Current Features
 
