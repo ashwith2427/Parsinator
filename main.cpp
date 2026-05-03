@@ -1,3 +1,8 @@
-#include "parser.hpp"
+#include "parser.h"
 
-int main() { return 0; }
+int main()
+{
+    constexpr auto result
+        = CharacterParser<'f'>().parse(TokenStream("vailed", 6));
+    return 0;
+}
