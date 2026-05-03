@@ -12,7 +12,7 @@ A lightweight parser combinator library for expressive and composable parsing in
 - [x] Clean and readable combinator syntax using `>>` (Sequence) and `|` (Choice)  
 - [x] Improved `Result` type with error tracking and input index consumption  
 - [x] Zero dynamic allocations — no heap usage at runtime  
-- [x] Fully header-only and portable (single `.hpp` file)  
+- [x] Fully header-only and portable (single `.h` file)  
 - [x] Debug-friendly utilities using `__PRETTY_FUNCTION__` (experimental, improvable)  
 - [x] Extensible parser abstraction — supports custom parsers and combinators  
 
