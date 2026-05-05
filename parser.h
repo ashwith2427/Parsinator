@@ -1,5 +1,3 @@
-#ifndef PARSER_H
-
 #include <iostream>
 #include <optional>
 #include <span>
@@ -92,6 +90,19 @@ public:
     constexpr Result<T> parse(std::span<Tok const> tokens) const
     {
         return _apply(tokens);
+    }
+    template <class MapFn> constexpr auto map(MapFn&& fn) const
+    {
+        using U = std::invoke_result_t<MapFn, T>;
+        auto newFn
+            = [=, *this](std::span<Tok const> tokens) -> Result<U> {
+            auto res = this->parse(tokens);
+            if (res.is_error()) {
+                return Result<U>(res.error(), res.index());
+            }
+            return Result<U>(fn(res.ok()), res.index());
+        };
+        return Parser<U, Tok, decltype(newFn)>(std::move(newFn));
     }
 
 private:
@@ -341,12 +352,10 @@ template <bool Ok, uint32_t Index> struct DebugParse {
 
 template <class T> void print_T()
 {
-    std::cout << __PRETTY_FUNCTION__;
+    std::cout << __PRETTY_FUNCTION__ << '\n';
 }
 
 template <class A, class B> constexpr auto operator>>(A&& a, B&& b)
 {
     return Sequence(std::forward<A>(a), std::forward<B>(b));
 };
-
-#endif
