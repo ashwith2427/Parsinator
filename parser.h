@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -13,12 +14,13 @@ public:
         : _msg(error)
     {
     }
-    constexpr const char* error() { return _msg; }
+    constexpr const char* what() const { return _msg; }
 
 private:
     const char* _msg;
 };
 
+struct Void { };
 template <class T> class Result {
 public:
     using value_type = T;
@@ -48,33 +50,6 @@ public:
 private:
     bool _ok;
     T _value { };
-    ParseError _error { "" };
-    uint32_t _idx;
-};
-
-template <> class Result<void> {
-public:
-    constexpr Result(uint32_t idx)
-        : _ok(true)
-        , _idx(idx)
-    {
-    }
-
-    constexpr Result(ParseError e, uint32_t idx)
-        : _ok(false)
-        , _error(e)
-        , _idx(idx)
-    {
-    }
-
-    constexpr bool is_ok() const { return _ok; }
-    constexpr bool is_error() const { return !_ok; }
-
-    constexpr ParseError const& error() const { return _error; }
-    constexpr uint32_t index() const { return _idx; }
-
-private:
-    bool _ok;
     ParseError _error { "" };
     uint32_t _idx;
 };
@@ -115,9 +90,11 @@ constexpr decltype(auto) parser(Fn&& fn)
     return Parser<T, Tok, Fn>(std::forward<Fn>(fn));
 }
 
-template <class P> using ValueOf = typename P::result_type;
+template <class P>
+using ValueOf = typename std::decay_t<P>::result_type;
 
-template <class P> using TokenOf = typename P::token_type;
+template <class P>
+using TokenOf = typename std::decay_t<P>::token_type;
 
 template <class... Ts> struct type_list { };
 
@@ -171,6 +148,10 @@ template <class T> struct to_list {
     using type = type_list<T>;
 };
 
+template <> struct to_list<Void> {
+    using type = type_list<>;
+};
+
 template <class... Ts> struct to_list<std::tuple<Ts...>> {
     using type = typename concat<typename to_list<Ts>::type...>::type;
 };
@@ -217,9 +198,17 @@ template <class A, class B> constexpr auto Sequence(A&& a, B&& b)
             if (res2.is_error()) {
                 return { res2.error(), res1.index() + res2.index() };
             }
-            return Result<T>(std::tuple_cat(as_tuple(res1.ok()),
-                                 as_tuple(res2.ok())),
-                res1.index() + res2.index());
+            if constexpr (std::is_same_v<T1, Void>) {
+                return Result<T>(
+                    as_tuple(res2.ok()), res1.index() + res2.index());
+            } else if constexpr (std::is_same_v<T2, Void>) {
+                return Result<T>(
+                    as_tuple(res1.ok()), res1.index() + res2.index());
+            } else {
+                return Result<T>(std::tuple_cat(as_tuple(res1.ok()),
+                                     as_tuple(res2.ok())),
+                    res1.index() + res2.index());
+            }
         });
 }
 
@@ -243,10 +232,10 @@ template <class P> constexpr auto Discard(P&& p)
     using T = ValueOf<P>;
     using Tok = TokenOf<P>;
     return parser<void, Tok>(
-        [=](auto tokens) constexpr -> Result<void> {
+        [=](auto tokens) constexpr -> Result<Void> {
             auto res = p.parse(tokens);
             if (res.is_error()) {
-                return Result<void>(0);
+                return Result<Void>(Void { }, 0);
             }
             size_t idx = res.index();
             while (!res.is_error()) {
@@ -255,7 +244,7 @@ template <class P> constexpr auto Discard(P&& p)
                 res = p.parse(tokens.subspan(idx));
                 idx += res.index();
             }
-            return Result<void>(idx);
+            return Result<Void>(Void { }, idx);
         });
 }
 
@@ -328,6 +317,48 @@ template <class A, class B> constexpr auto Choice(A&& a, B&& b)
     });
 }
 
+template <class A, class B> constexpr auto KeepLeft(A&& a, B&& b)
+{
+    using T = ValueOf<A>;
+    using Tok = TokenOf<A>;
+    return parser<T, Tok>([=](auto tokens) constexpr -> Result<T> {
+        auto res1 = a.parse(tokens);
+        if (res1.is_error()) {
+            return Result<T>(
+                ParseError("Left Parser Failed in KeepLeft"),
+                res1.index());
+        }
+        auto res2 = b.parse(tokens.subspan(res1.index()));
+        if (res2.is_error()) {
+            return Result<T>(
+                ParseError("Right Parser Failed in KeepLeft"),
+                res2.index());
+        }
+        return Result<T>(res1.ok(), res1.index() + res2.index());
+    });
+}
+
+template <class A, class B> constexpr auto KeepRight(A&& a, B&& b)
+{
+    using T = ValueOf<B>;
+    using Tok = TokenOf<B>;
+    return parser<T, Tok>([=](auto tokens) constexpr -> Result<T> {
+        auto res1 = a.parse(tokens);
+        if (res1.is_error()) {
+            return Result<T>(
+                ParseError("Left Parser Failed in KeepRight"),
+                res1.index());
+        }
+        auto res2 = b.parse(tokens.subspan(res1.index()));
+        if (res2.is_error()) {
+            return Result<T>(
+                ParseError("Right Parser Failed in KeepRight"),
+                res2.index());
+        }
+        return Result<T>(res2.ok(), res1.index() + res2.index());
+    });
+}
+
 constexpr auto CharacterParser(char c)
 {
     return parser<char, char>([=](auto tokens) constexpr
@@ -359,3 +390,32 @@ template <class A, class B> constexpr auto operator>>(A&& a, B&& b)
 {
     return Sequence(std::forward<A>(a), std::forward<B>(b));
 };
+
+template <class T> struct is_parser : std::false_type { };
+
+template <class Tok, class T, class Fn>
+struct is_parser<Parser<Tok, T, Fn>> : std::true_type { };
+
+template <class A, class B>
+constexpr auto operator|(A&& a, B&& b)
+    requires is_parser<std::decay_t<A>>::value
+    && is_parser<std::decay_t<B>>::value
+{
+    return Choice(std::forward<A>(a), std::forward<B>(b));
+}
+
+template <class A, class B>
+constexpr auto operator<(A&& a, B&& b)
+    requires is_parser<std::decay_t<A>>::value
+    && is_parser<std::decay_t<B>>::value
+{
+    return KeepLeft(std::forward<A>(a), std::forward<B>(b));
+}
+
+template <class A, class B>
+    requires is_parser<std::decay_t<A>>::value
+    && is_parser<std::decay_t<B>>::value
+constexpr auto operator>(A&& a, B&& b)
+{
+    return KeepRight(std::forward<A>(a), std::forward<B>(b));
+}
